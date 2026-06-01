@@ -1,0 +1,10 @@
+# Centralized paths — the ONLY place configs reference machine locations.
+# Values resolve from environment variables (.env), mirroring
+# src/tau2_airline_verl/utils/paths.py. verl/Hydra resolves ${oc.env:VAR,default}
+# at runtime, so no machine path is ever hard-coded in a tracked file.
+model_path:        ${oc.env:QWEN3_8B_PATH}
+tau2_dir:          ${oc.env:TAU2_DIR,third_party/tau2-bench}
+verl_dir:          ${oc.env:VERL_DIR,third_party/verl}
+output_dir:        ${oc.env:OUTPUT_DIR,outputs}
+traj_dir:          ${oc.env:TRAJ_DIR,data/trajectories}
+usersim_cache_dir: data/usersim_cache

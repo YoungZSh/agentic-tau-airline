@@ -7,8 +7,10 @@ name = "tau2-airline-verl"
 version = "0.0.1"
 description = "tau3-bench Airline x verl: multi-turn LoRA GRPO (RL-zero) agentic RL pipeline"
 requires-python = ">=3.12,<3.14"
-# NOTE: verl and tau2 are installed editable into the conda env (tau2verl) and are
-# intentionally NOT listed here. This package only declares its own light deps.
+# NOTE: verl and tau2-bench live as read-only git submodules under third_party/
+# (pinned commits) and are installed editable into the conda env by
+# scripts/install.sh; they are intentionally NOT listed here. This package only
+# declares its own light deps.
 dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0",

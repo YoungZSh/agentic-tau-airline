@@ -8,7 +8,7 @@ algorithm:
 
 actor_rollout_ref:
   model:
-    path: /home/yzs/ckpts/Qwen3-8B
+    path: ${oc.env:QWEN3_8B_PATH}        # from .env (configs/paths.yaml); no hard-coded path
     lora:
       rank: 16
       alpha: 32
@@ -18,7 +18,7 @@ actor_rollout_ref:
     kl_loss_coef: 0.01
     # reference policy = adapter-off base (LoRA), no extra ref model in memory
   rollout:
-    name: sglang
+    name: vllm                  # installed & verified (verl AgentLoop server-mode; sglang also works)
     mode: async                 # server-mode AgentLoop (concurrent on-policy rollout)
     n: 8                         # GRPO group size
     response_length: 8192
@@ -29,7 +29,7 @@ actor_rollout_ref:
       max_user_turns: 12
     agent:
       default_agent_loop: tau2_airline
-      agent_loop_config_path: configs/verl/tau2_agent_loop.yaml
+      agent_loop_config_path: configs/tau2_agent_loop.yaml
 
 reward:
   reward_manager: {source: register, name: naive}

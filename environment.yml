@@ -1,0 +1,20 @@
+# Conda environment for agentic-tau-airline.
+#
+# NOTE: the heavy stack (verl + torch / sglang / vllm) is NOT recreated from
+# here. This project runs in an env CLONED from a working `verl` env, to avoid
+# re-resolving those deps:
+#     conda create --clone verl -n tau2verl
+# Then `bash scripts/setup/install.sh` installs verl + tau2 (third_party submodules)
+# and this package editable. The list below is only the light extras this
+# project adds on top of that base env.
+name: tau2verl
+channels: [conda-forge]
+dependencies:
+  - python>=3.12,<3.14
+  - pip
+  - pip:
+      - python-dotenv>=1.0
+      - pyyaml>=6.0
+      # This machine routes via a SOCKS proxy; litellm/httpx need these:
+      - httpx[socks]
+      - socksio

@@ -1,0 +1,26 @@
+# Rollout config — concurrent on-policy multi-turn (plan §13/§14) — STAGE 2.
+# Indicative keys; reconcile with the installed verl rollout schema before running.
+backend: vllm                # installed & verified; verl AgentLoop server-mode supports it (sglang also works if installed)
+mode: async                 # server-mode AgentLoop; hides tool/API latency (plan §7)
+n: 8                        # GRPO group size (plan §11.4: >=8 to avoid all-0/all-1)
+concurrency: high           # in-flight trajectories to keep GPU generation busy
+
+multi_turn:
+  enable: true
+  format: hermes            # Qwen3 native function-calling (plan §6.2)
+  max_assistant_turns: 12   # MVP 8; airline often needs 5~7 tool calls (plan §14)
+  max_user_turns: 12
+  max_tool_calls: 8
+
+length:
+  response_length: 8192     # MVP 4096 (plan §14)
+  max_tool_observation_tokens: 512
+  max_new_tokens_per_turn: 256
+
+user_simulator:
+  model: ${oc.env:TAU2_USER_MODEL,gpt-5}
+  cache: true               # plan §13.2: key = task+policy_version+model+temp+conv_hash
+
+agent:
+  default_agent_loop: tau2_airline
+  agent_loop_config_path: configs/tau2_agent_loop.yaml

@@ -47,7 +47,7 @@ class Tau2AirlineAgentLoop(AgentLoopBase):
       - user turn (no tool call): tau2 UserSimulator.generate_next_message
         (litellm, async await); append user msg; mask += [0]*len.
       - terminate on user stop / max turns / response_length budget.
-      - reward: build SimulationRun -> reward.evaluate.compute_reward (official
+      - reward: build SimulationRun -> env.reward.compute_reward (official
         reward_basis); set reward_score; put per-component subscores in
         extra_fields for training curves.
     """
@@ -60,7 +60,7 @@ class Tau2AirlineAgentLoop(AgentLoopBase):
         self.response_length = self.rollout_config.response_length
         self.tool_parser_name = mt.format
         # TODO(stage2): self.tool_parser = ToolParser.get_tool_parser(mt.format, self.tokenizer)
-        # TODO(stage2): cache airline tool schemas (tau2env.airline_tool_schemas()).
+        # TODO(stage2): cache airline tool schemas (env.airline_tool.airline_tool_schemas()).
 
     async def run(self, sampling_params: dict[str, Any], **kwargs) -> AgentLoopOutput:
         # ---- STAGE 0 SKELETON: not yet implemented ----

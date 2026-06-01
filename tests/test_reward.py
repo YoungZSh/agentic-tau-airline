@@ -9,7 +9,7 @@ import tau2.evaluator.evaluator_nl_assertions as _nl_mod
 from tau2.data_model.simulation import SimulationRun, TerminationReason
 
 from tau2_airline_verl.data.splits import load_tasks
-from tau2_airline_verl.reward.evaluate import compute_reward, set_nl_judge_model
+from tau2_airline_verl.env.reward import compute_reward, set_nl_judge_model
 
 
 def _premature_sim(task_id: str) -> SimulationRun:
