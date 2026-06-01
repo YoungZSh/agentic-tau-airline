@@ -1,0 +1,7 @@
+# Reward config (official口径).
+# Each task uses its own evaluation_criteria.reward_basis; final reward is the
+# product of those components (tau2 EvaluationType.ALL). Per-component subscores
+# are logged as curves.
+evaluation_type: all          # tau2 EvaluationType.ALL
+nl_judge_model: gpt-5         # overrides tau2 default gpt-4.1-2025-04-14
+# Components surfaced for curves: DB, ENV_ASSERTION, ACTION, COMMUNICATE, NL_ASSERTION

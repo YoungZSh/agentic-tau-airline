@@ -1,0 +1,41 @@
+# STAGE-2 PLACEHOLDER — verl GRPO + LoRA + multi-turn (RL-zero). Not run in stage 0.
+# Keys are indicative; reconcile against the installed verl version's ppo_trainer.yaml
+# before running (verl experimental APIs move).
+algorithm:
+  adv_estimator: grpo
+  norm_adv_by_std_in_grpo: true
+  use_kl_in_reward: false
+
+actor_rollout_ref:
+  model:
+    path: /home/yzs/ckpts/Qwen3-8B
+    lora:
+      rank: 16
+      alpha: 32
+      target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  actor:
+    use_kl_loss: true
+    kl_loss_coef: 0.01
+    # reference policy = adapter-off base (LoRA), no extra ref model in memory
+  rollout:
+    name: sglang
+    mode: async                 # server-mode AgentLoop (concurrent on-policy rollout)
+    n: 8                         # GRPO group size
+    response_length: 8192
+    multi_turn:
+      enable: true
+      format: hermes             # Qwen3 native tool-calling
+      max_assistant_turns: 12
+      max_user_turns: 12
+    agent:
+      default_agent_loop: tau2_airline
+      agent_loop_config_path: configs/verl/tau2_agent_loop.yaml
+
+reward:
+  reward_manager: {source: register, name: naive}
+  # custom_reward_function points at tau2_airline_verl reward; or reward_score set by AgentLoop
+
+trainer:
+  critic_warmup: 0
+  n_gpus_per_node: 2
+  nnodes: 1

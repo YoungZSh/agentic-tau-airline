@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tau2-airline-verl"
+version = "0.0.1"
+description = "tau3-bench Airline x verl: multi-turn LoRA GRPO (RL-zero) agentic RL pipeline"
+requires-python = ">=3.12,<3.14"
+# NOTE: verl and tau2 are installed editable into the conda env (tau2verl) and are
+# intentionally NOT listed here. This package only declares its own light deps.
+dependencies = [
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

@@ -1,0 +1,4 @@
+# User simulator config (external API via litellm).
+model: gpt-5                  # decision: gpt-5 user simulator
+llm_args: {}                  # keep empty for gpt-5 (avoid unsupported temperature); set {"temperature": 0.0} for non-reasoning models
+# OPENAI_API_KEY read from env by litellm. Optional OPENAI_BASE_URL for compatible endpoints.
