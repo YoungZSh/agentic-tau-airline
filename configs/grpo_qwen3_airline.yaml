@@ -1,41 +1,79 @@
-# STAGE-2 PLACEHOLDER — verl GRPO + LoRA + multi-turn (RL-zero). Not run in stage 0.
-# Keys are indicative; reconcile against the installed verl version's ppo_trainer.yaml
-# before running (verl experimental APIs move).
+# Reference config for GRPO + LoRA + multi-turn async rollout (verl 0.9.0.dev).
+#
+# This file is DOCUMENTATION. The authoritative, runnable entry point is
+# scripts/train/run_grpo.sh, which passes these as CLI overrides on top of
+# verl's default ppo_trainer.yaml (the verl-idiomatic way). Keys here are the
+# real verl keys (verified against verl/trainer/config/*.yaml); values match the
+# script's defaults. Edit the script (or its env vars) to change a run.
+#
+# Reward: produced by our tau2_airline AgentLoop (reward_score -> rm_scores[-1]);
+# the default `naive` reward manager returns it directly — no custom reward fn.
+
 algorithm:
-  adv_estimator: grpo
+  adv_estimator: grpo                 # ppo_trainer.yaml
   norm_adv_by_std_in_grpo: true
-  use_kl_in_reward: false
+  use_kl_in_reward: false             # GRPO uses actor.use_kl_loss instead
+
+data:
+  train_files: data/tau3_airline/train.parquet
+  val_files: data/tau3_airline/test.parquet
+  train_batch_size: 30                # 30 train tasks -> 1 GRPO step/epoch
+  max_prompt_length: 6144             # full initial prompt (policy + 14 tools + first turn) ~4.8k tokens
+  max_response_length: 8192           # plan §14 first version (4k MVP / 8k)
+  return_raw_chat: true               # AgentLoop applies the chat template itself
+  filter_overlong_prompts: true
+  truncation: error
 
 actor_rollout_ref:
   model:
-    path: ${oc.env:QWEN3_8B_PATH}        # from .env (configs/paths.yaml); no hard-coded path
-    lora:
-      rank: 16
-      alpha: 32
-      target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+    path: ${oc.env:QWEN3_8B_PATH}     # ./ckpts/Qwen3-8B
+    lora_rank: 16                     # plan §6.3 first version (r16/alpha32)
+    lora_alpha: 32
+    target_modules: all-linear        # FSDP-recommended (covers q/k/v/o/gate/up/down)
+    use_remove_padding: true
+    enable_gradient_checkpointing: true
   actor:
-    use_kl_loss: true
-    kl_loss_coef: 0.01
-    # reference policy = adapter-off base (LoRA), no extra ref model in memory
+    optim: {lr: 3e-6}
+    ppo_mini_batch_size: 15
+    use_dynamic_bsz: true
+    ppo_max_token_len_per_gpu: 16384
+    use_kl_loss: true                 # GRPO; reference = adapter-off base (LoRA), no extra ref model
+    kl_loss_coef: 0.01                # plan §12.4
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+    fsdp_config: {param_offload: false, optimizer_offload: false}
   rollout:
-    name: vllm                  # installed & verified (verl AgentLoop server-mode; sglang also works)
-    mode: async                 # server-mode AgentLoop (concurrent on-policy rollout)
-    n: 8                         # GRPO group size
-    response_length: 8192
+    name: vllm                        # installed & verified
+    mode: async                       # server-mode AgentLoop (concurrent on-policy rollout)
+    tensor_model_parallel_size: 2
+    gpu_memory_utilization: 0.5
+    n: 8                              # GRPO group size (plan §11.4: >=8)
+    load_format: safetensors          # required for LoRA rollout
+    layered_summon: true              # required for large-model LoRA
+    log_prob_use_dynamic_bsz: true
+    log_prob_max_token_len_per_gpu: 16384
     multi_turn:
       enable: true
-      format: hermes             # Qwen3 native tool-calling
-      max_assistant_turns: 12
+      format: hermes                  # Qwen3 native function-calling (plan §6.2)
+      max_assistant_turns: 12         # plan §14
       max_user_turns: 12
     agent:
+      num_workers: 8
       default_agent_loop: tau2_airline
-      agent_loop_config_path: configs/tau2_agent_loop.yaml
-
-reward:
-  reward_manager: {source: register, name: naive}
-  # custom_reward_function points at tau2_airline_verl reward; or reward_score set by AgentLoop
+      agent_loop_config_path: configs/tau2_agent_loop.yaml   # registers Tau2AirlineAgentLoop
+  ref:
+    log_prob_use_dynamic_bsz: true
+    log_prob_max_token_len_per_gpu: 16384
+    fsdp_config: {param_offload: true}
 
 trainer:
-  critic_warmup: 0
+  balance_batch: true
+  logger: ["console", "wandb"]
+  project_name: verl_grpo_airline
+  experiment_name: qwen3_8b_lora_tau2_airline
   n_gpus_per_node: 2
   nnodes: 1
+  val_before_train: false
+  save_freq: 10
+  test_freq: 5
+  total_epochs: 30

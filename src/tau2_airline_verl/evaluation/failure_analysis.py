@@ -21,8 +21,32 @@ FAILURE_TAGS = [
 
 
 def tag_failure(trajectory: dict[str, Any]) -> list[str]:
-    """Return failure tags for one trajectory (subset of FAILURE_TAGS). STAGE 3 stub."""
-    raise NotImplementedError("failure analysis implemented in stage 3.")
+    """Heuristic failure tags for one failed trajectory (plan §18.4).
+
+    Successful trajectories (reward >= 1) return []. Tags are derived from the
+    per-component reward breakdown, termination reason, and tool-call stats.
+    """
+    if trajectory.get("reward", 0.0) >= 1.0:
+        return []
+
+    tags: list[str] = []
+    comps = trajectory.get("reward_components", {}) or {}
+    stats = trajectory.get("stats", {}) or {}
+    term = trajectory.get("termination_reason")
+
+    db = comps.get("DB")
+    comm = comps.get("COMMUNICATE")
+    if db is not None and db < 1.0:
+        tags.append("wrong_arguments")  # DB end-state mismatch -> wrong action/args
+    if comm is not None and comm < 1.0:
+        tags.append("failed_to_communicate")
+    if stats.get("num_invalid_tool_calls", 0) > 0:
+        tags.append("wrong_tool")
+    if term == "max_steps":
+        tags.append("too_many_turns")
+    if not tags:
+        tags.append("policy_violation")  # failed but components don't localize it
+    return tags
 
 
 __all__ = ["FAILURE_TAGS", "tag_failure"]

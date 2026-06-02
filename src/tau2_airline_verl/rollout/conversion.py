@@ -67,13 +67,34 @@ def tool_message_to_text(tool_msg: ToolMessage) -> str:
     return tool_msg.content or ""
 
 
-# TODO(stage2): builders for the assistant message tau2 expects when the policy
-# emits a tool call (AssistantMessage(tool_calls=[...])) and the user-facing
-# AssistantMessage(content=...), so tau2's Environment / UserSimulator can be
-# driven directly from token-level model output parsed by verl's ToolParser.
+def build_tau2_assistant(
+    content: str | None, parsed_tool_calls: list[Any] | None = None
+) -> AssistantMessage:
+    """Build the tau2 AssistantMessage mirroring one policy turn.
+
+    `parsed_tool_calls` are verl ToolParser `FunctionCall`-like objects (`.name`,
+    `.arguments` JSON string). They become structured tau2 `ToolCall`s (with
+    deterministic ids `call_0`, `call_1`, ...) so the official evaluator can
+    replay them via `Environment.set_state(message_history=...)`. The ToolMessage
+    that tau2's env returns reuses the same id, keeping call/result pairs aligned.
+    """
+    tau2_tcs = None
+    if parsed_tool_calls:
+        tau2_tcs = [
+            openai_tool_call_to_tau2(fc.name, fc.arguments, call_id=f"call_{i}")
+            for i, fc in enumerate(parsed_tool_calls)
+        ]
+    return AssistantMessage(
+        role="assistant",
+        content=content if content else None,
+        tool_calls=tau2_tcs,
+    )
+
+
 __all__ = [
     "tau2_message_to_openai",
     "tau2_messages_to_openai",
     "openai_tool_call_to_tau2",
     "tool_message_to_text",
+    "build_tau2_assistant",
 ]

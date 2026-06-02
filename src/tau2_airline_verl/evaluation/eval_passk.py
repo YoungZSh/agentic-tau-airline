@@ -19,8 +19,16 @@ def pass_at_1(rewards: list[float]) -> float:
 
 
 def pass_hat_k(rewards_by_task: dict[str, list[float]], k: int) -> float:
-    """Strict pass^k: fraction of tasks solved in ALL k attempts. STAGE 3 stub."""
-    raise NotImplementedError("pass^k aggregation implemented in stage 3.")
+    """Strict pass^k: fraction of tasks solved in ALL k attempts (tau2's
+    reliability metric). Tasks with fewer than k attempts are skipped."""
+    scored = []
+    for rewards in rewards_by_task.values():
+        if len(rewards) < k:
+            continue
+        scored.append(1.0 if all(r >= 1.0 for r in rewards[:k]) else 0.0)
+    if not scored:
+        return 0.0
+    return sum(scored) / len(scored)
 
 
 __all__ = ["pass_at_1", "pass_hat_k"]
