@@ -898,7 +898,7 @@ API user simulator（verl Interaction）+ 缓存
 - **运行环境**：conda env `tau2verl`（克隆自 `verl`，保护原 env）。tau2 经 `pip install -e` 装入；`openai` 被 litellm 升到 2.37，但 verl/vllm/sglang/litellm 均 import 正常，无致命冲突；本机走 SOCKS 代理，需补 `pip install httpx[socks] socksio`。
 - **外部 API**：user-sim / agent / judge 用 **gpt-5**，经第三方 OpenAI 兼容代理 **`https://yunwu.ai/v1`**（`.env` 设 `OPENAI_API_KEY` + `OPENAI_API_BASE`/`OPENAI_BASE_URL`）。gpt-5 是 reasoning 模型，**不要传 `temperature`**（llm_args 留空）。
 - **接入策略**：策略B —— 自定义 `AgentLoopBase` 子类 `@register("tau2_airline")`（本版 verl 无 Interaction 抽象，弃用早期"verl Interaction"说法）。reward 复用 tau2 `evaluate_simulation(EvaluationType.ALL)`，逐组件子分来自 `RewardInfo.reward_breakdown`。
-- **任务规模**：airline 共 50 任务，split `train=30 / test=20`（disjoint，held-out 用 test）。14 个工具。
+- **任务规模**：airline 共 50 任务，split `train=40 / test=10`（disjoint，held-out 用 test；test 按 gpt-5 功能场景标签分层，每场景≥1，本地 `airline_split.json` 维护，不碰 submodule）。14 个工具。
 - **重要 reward 结论**：**全部 50 个 airline 任务的 `reward_basis` 都是 `[DB, COMMUNICATE]`，0 个含 NL_ASSERTION / ACTION**。即 airline 的 reward 完全确定性（DB 哈希比对 + 子串匹配），**gpt-5 NL judge 对 airline 永不触发、训练时 reward 计算零 judge 成本**。§11.3 的"communicate 是否走 LLM"悬念就此清除：airline 不需要 judge；gpt-5 仅用于 user simulator（每轮一次调用）。
 - **验收**：`pytest` 7/7 通过；理解笔记产出；AgentLoop 注册通过；sanity rollout（task 0，gpt-5）端到端跑通，多轮 + 工具调用，reward=1.0（DB=1.0, COMMUNICATE=1.0）。
 

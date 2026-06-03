@@ -1,31 +1,66 @@
 """Airline task split loading (train / held-out).
 
-Thin wrapper over tau2's own split machinery. The airline split file
-(`split_tasks.json`) defines: train(30), test(20), base(50=all).
+Custom 40/10 stratified split maintained HERE — not in the read-only tau2
+submodule. The split ids live in `airline_split.json` next to this file. They
+were produced by stratifying the 50 airline tasks over gpt-5-labelled
+*functional categories* (cancellation / booking / flight_change /
+baggage_passenger / compensation / insurance / other) so the held-out `test`
+split (10 tasks) covers every scenario category at least once; leftover test
+seats go to the largest categories. See the `_meta` block inside that JSON.
 
-Methodology: we train on `train` and report all metrics on the held-out
-`test` split. The two are disjoint (verified in `summarize_splits`).
+We deliberately bypass tau2's own `get_tasks_split()` (which reads
+`split_tasks.json` inside the pinned, read-only submodule). Instead we load ALL
+airline tasks and filter by our local id lists. `train`(40) and `test`(10) are
+disjoint; `base` is their union (all 50). Disjointness is checked in
+`summarize_splits`.
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Optional
 
 from tau2.data_model.tasks import Task
-from tau2.domains.airline.environment import get_tasks, get_tasks_split
+from tau2.domains.airline.environment import get_tasks
 
 DEFAULT_TRAIN_SPLIT = "train"
 DEFAULT_EVAL_SPLIT = "test"
 
+# Local split definition (sibling file). Keys beginning with "_" (e.g. `_meta`,
+# `_categories`) are documentation only and are NOT returned as splits.
+_SPLIT_FILE = Path(__file__).with_name("airline_split.json")
+_SPLIT_KEYS = ("train", "test", "base")
+
 
 def get_splits() -> dict[str, list[str]]:
-    """Return {split_name: [task_id, ...]} as defined by the airline split file."""
-    return get_tasks_split()
+    """Return {split_name: [task_id, ...]} from the local stratified split file."""
+    data = json.loads(_SPLIT_FILE.read_text())
+    return {k: list(data[k]) for k in _SPLIT_KEYS if k in data}
+
+
+def get_task_categories() -> dict[str, str]:
+    """Return {task_id: functional_category} — the gpt-5 labels the split was
+    stratified over (cancellation / booking / flight_change / ...). Used to
+    assert that `test` covers every scenario category."""
+    data = json.loads(_SPLIT_FILE.read_text())
+    return dict(data.get("_categories", {}))
 
 
 def load_tasks(split: Optional[str] = None) -> list[Task]:
-    """Load airline tasks for a split name. `None` loads all tasks (no filtering)."""
-    return get_tasks(task_split_name=split)
+    """Load airline tasks for a split name. `None` loads all tasks (no filtering).
+
+    Loads every airline task from tau2, then filters by our local id lists —
+    this is what lets us redefine the split without touching the submodule.
+    """
+    tasks = get_tasks(task_split_name=None)
+    if split is None:
+        return tasks
+    splits = get_splits()
+    if split not in splits:
+        raise ValueError(f"Invalid split name: {split}. Valid splits are: {list(splits)}")
+    ids = set(splits[split])
+    return [task for task in tasks if task.id in ids]
 
 
 def load_train_tasks() -> list[Task]:

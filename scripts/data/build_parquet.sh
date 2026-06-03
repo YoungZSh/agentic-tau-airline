@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build verl GRPO parquet datasets (train=30 / test=20) from tau2 airline tasks.
+# Build verl GRPO parquet datasets (train=40 / test=10) from tau2 airline tasks.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$HERE"

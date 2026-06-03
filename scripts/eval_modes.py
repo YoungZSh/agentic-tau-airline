@@ -29,7 +29,7 @@ from tau2.orchestrator.orchestrator import Orchestrator
 from tau2.runner import build_environment, build_user, run_simulation
 from tau2.evaluator.evaluator import EvaluationType
 from tau2.data_model.tasks import RewardType
-from tau2.domains.airline.environment import get_tasks
+from tau2_airline_verl.data.splits import load_tasks
 import tau2.evaluator.evaluator_nl_assertions as _nl
 _nl.DEFAULT_LLM_NL_ASSERTIONS = os.environ.get("TAU2_NL_JUDGE_MODEL", "gpt-5")
 
@@ -139,7 +139,7 @@ print("[load] done.", flush=True)
 
 N_TASKS = int(sys.argv[1]) if len(sys.argv) > 1 else 2
 K_RUNS = int(sys.argv[2]) if len(sys.argv) > 2 else 8
-all_tasks = get_tasks("train")
+all_tasks = load_tasks("train")  # 本地分层 40/10 split(src/.../splits.py),非 submodule 旧 split
 tasks = all_tasks[:N_TASKS]
 MODES = [
     ("thinking",    {},                          dict(temperature=TEMPERATURE, top_p=0.95, top_k=20)),

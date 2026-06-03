@@ -14,7 +14,8 @@ pipeline (plan stages 1–3) is implemented; see Quickstart below.
 third_party/              verl + tau2-bench (read-only git submodules; not modified)
 src/tau2_airline_verl/
   data/
-    splits.py             train/held-out task splits (train=30, test=20)
+    splits.py             train/held-out task splits (train=40, test=10; test stratified by scenario)
+    airline_split.json    local 40/10 split ids + gpt-5 scenario labels (bypasses submodule split)
     build_parquet.py      airline tasks -> verl GRPO parquet (prompt=[system]; extra_info.task_id)
   env/                    plan §17 env/ — tau2 adapters (none modify tau2 source)
     airline_tool.py       airline Environment + tools + policy.md
@@ -56,7 +57,7 @@ bash scripts/setup/download_qwen3_8b.sh
 # 3) offline tests (no GPU/API)
 conda run -n tau2verl python -m pytest tests/ -q
 
-# 4) build verl datasets (train=30 / test=20)
+# 4) build verl datasets (train=40 / test=10)
 bash scripts/data/build_parquet.sh
 
 # 5) stage 1 — base rollout GO/NO-GO (starts a local vLLM server, runs tau2 eval)

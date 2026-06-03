@@ -30,7 +30,7 @@ from tau2.agent.base_agent import HalfDuplexAgent
 from tau2.orchestrator.orchestrator import Orchestrator
 from tau2.runner import build_environment, build_user, run_simulation
 from tau2.evaluator.evaluator import EvaluationType
-from tau2.domains.airline.environment import get_tasks
+from tau2_airline_verl.data.splits import load_tasks
 import tau2.evaluator.evaluator_nl_assertions as _nl
 _nl.DEFAULT_LLM_NL_ASSERTIONS = os.environ.get("TAU2_NL_JUDGE_MODEL", "gpt-5")
 
@@ -166,7 +166,7 @@ print(f"[load] done. mode={'thinking' if _is_thinking else 'non-thinking'} sampl
 
 # --- 3. 任务 + 三方组件 ---
 TASK_ID = sys.argv[1] if len(sys.argv) > 1 else "0"
-tasks = get_tasks("train")
+tasks = load_tasks(None)  # 全部 50 个任务,便于按 task_id 演示任意一条(含默认 "0",它现在属 test)
 task = next((t for t in tasks if str(t.id) == TASK_ID), tasks[0])
 ins = task.user_scenario.instructions
 print(f"\n[task] id={task.id}", flush=True)

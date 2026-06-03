@@ -27,6 +27,8 @@ from collections import defaultdict
 from tau2.data_model.simulation import TextRunConfig
 from tau2.run import run_domain
 
+from tau2_airline_verl.data.splits import get_splits
+
 
 def aggregate(results, num_trials: int) -> dict:
     """pass@1 + per-task reward variance buckets for the GO/NO-GO gate."""
@@ -93,6 +95,12 @@ def main() -> None:
     ap.add_argument("--out", default=None, help="write GO/NO-GO markdown here")
     args = ap.parse_args()
 
+    # Resolve --split through our LOCAL stratified 40/10 split (splits.py), NOT
+    # tau2's submodule split_tasks.json: pass the ids as task_ids and leave
+    # task_split_name=None so run_domain loads all 50 tasks and filters to ours.
+    # An explicit --task-ids subset (smoke) still wins.
+    task_ids = args.task_ids if args.task_ids else get_splits()[args.split]
+
     config = TextRunConfig(
         domain="airline",
         agent="llm_agent",
@@ -103,8 +111,8 @@ def main() -> None:
         llm_args_user={},  # gpt-5 reasoning: no temperature
         num_trials=args.num_trials,
         task_set_name="airline",
-        task_split_name=args.split,
-        task_ids=args.task_ids,
+        task_split_name=None,
+        task_ids=task_ids,
         max_concurrency=args.max_concurrency,
         max_steps=args.max_steps,
         save_to=args.save_to,

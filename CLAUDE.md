@@ -38,7 +38,7 @@ conda run -n tau2verl python -m pytest tests/test_agent_loop.py -q      # 单个
 conda run -n tau2verl python -m pytest tests/ -q -k mask                # 单个测试
 conda run -n tau2verl ruff check src/ tests/                            # lint(line-length 100)
 
-# 构建 verl GRPO 数据集(train=30 / test=20 个 airline 任务)
+# 构建 verl GRPO 数据集(train=40 / test=10 个 airline 任务,test 按功能场景分层覆盖)
 bash scripts/data/build_parquet.sh               # -> data/tau3_airline/{train,test}.parquet
 
 # stage 1 —— base GO/NO-GO rollout(启动本地 vLLM server,跑 tau2 官方 runner)
@@ -106,7 +106,10 @@ held-out 评估(`evaluation/run_tau2_eval.py`)则改用 **tau2 自己的 `run_do
 OpenAI 工具 schema + `policy.md`;`airline_interaction.py` 接好 gpt-5 `UserSimulator`;
 `agents/qwen3_prompt.py` 把 system prompt 构建为 `policy.md`,而工具是*单独*传给 chat
 template 的(Qwen3 原生 / hermes 格式,绝不拼进 prompt 文本)——这种格式保真度正是跳过
-SFT(RL-zero)的前提。`data/splits.py` 包装 tau2 的 airline split(train=30、test=20,互不相交)。
+SFT(RL-zero)的前提。`data/splits.py` 在本地维护一份**分层 40/10 split**(`airline_split.json`,
+不碰只读 submodule):用 gpt-5 把 50 个任务按功能场景(取消/预订/改签/行李·乘客/补偿/保险/其他)打标,
+held-out `test`(10)保证每个场景至少 1 条、剩余名额按场景规模分配,`train`(40)与之互不相交。加载时
+绕过 tau2 的 `get_tasks_split()`(它读 submodule 旧 split),改为载入全部 50 任务再用本地 id 列表过滤。
 
 ## 配置约定
 

@@ -31,7 +31,7 @@ from tau2.runner import build_environment, build_user
 from tau2.evaluator.evaluator import evaluate_simulation, EvaluationType
 from tau2.data_model.simulation import SimulationRun, TerminationReason
 from tau2.data_model.tasks import RewardType
-from tau2.domains.airline.environment import get_tasks
+from tau2_airline_verl.data.splits import load_tasks
 from tau2.user.user_simulator import UserSimulator
 import tau2.evaluator.evaluator_nl_assertions as _nl
 _nl.DEFAULT_LLM_NL_ASSERTIONS = os.environ.get("TAU2_NL_JUDGE_MODEL", "gpt-5")
@@ -187,7 +187,7 @@ def run_group(mode_name, tkw, sp, task, k):
 
 N_TASKS = int(sys.argv[1]) if len(sys.argv) > 1 else 2
 K_RUNS = int(sys.argv[2]) if len(sys.argv) > 2 else 8
-tasks = get_tasks("train")[:N_TASKS]
+tasks = load_tasks("train")[:N_TASKS]  # 本地分层 40/10 split,非 submodule 旧 split
 MODES = [
     ("thinking",    {},                         SamplingParams(temperature=TEMPERATURE, top_p=0.95, top_k=20, max_tokens=2048)),
     ("nonthinking", {"enable_thinking": False},  SamplingParams(temperature=TEMPERATURE, top_p=0.80, top_k=20, max_tokens=2048)),
