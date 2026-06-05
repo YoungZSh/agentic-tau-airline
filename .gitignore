@@ -241,6 +241,8 @@ hydra_outputs/
 data/tau2/
 data/raw/
 data/processed/
+# downloaded external corpora (AReaL tau2 SFT/RL jsonl + upstream dataset card)
+local_datasets/
 *.parquet
 *.arrow
 *.feather
