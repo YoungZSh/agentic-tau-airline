@@ -118,14 +118,16 @@ celerybeat.pid
 *.sage.py
 
 # Environments
+# NOTE: anchor virtualenv dirs to repo root (/env/, not env/) so they don't
+# silently swallow the source package src/tau2_airline_verl/env/.
 .env
 .envrc
 .venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+/env/
+/venv/
+/ENV/
+/env.bak/
+/venv.bak/
 
 # Spyder project settings
 .spyderproject
