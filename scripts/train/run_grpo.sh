@@ -62,7 +62,7 @@ lora_alpha=${LORA_ALPHA:-64}
 rollout_tp=${ROLLOUT_TP:-2}
 rollout_gpu_mem_util=${ROLLOUT_GPU_MEM_UTIL:-0.5}
 rollout_n=${ROLLOUT_N:-8}                         # GRPO group size (plan §11.4: >=8)
-max_assistant_turns=${MAX_ASSISTANT_TURNS:-12}
+max_assistant_turns=${MAX_ASSISTANT_TURNS:-24}
 max_user_turns=${MAX_USER_TURNS:-12}
 # verl default 256 truncates get_user_details JSON and drops `reservations`, failing
 # the task; raise it so the agent can see the user's bookings.
