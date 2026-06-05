@@ -45,6 +45,7 @@ from tau2_airline_verl.data.splits import load_tasks
 from tau2_airline_verl.env.reward import set_nl_judge_model
 from tau2_airline_verl.rollout.conversion import tau2_messages_to_openai
 from tau2_airline_verl.rollout.tau2_session import Tau2Session
+from tau2_airline_verl.utils.litellm_setup import configure_litellm_from_env
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
@@ -79,6 +80,10 @@ class Tau2AirlineAgentLoop(AgentLoopBase):
         # airline reward is fully deterministic (DB hash + substring); the NL judge
         # never fires, but set the override once so any stray NL task uses gpt-5.
         set_nl_judge_model()
+        # Size the shared sync http pool for gpt-5 (user sim) so a transient
+        # PoolTimeout under concurrent rollouts can't kill the whole step. No-op
+        # unless TAU2_LLM_MAX_CONNECTIONS is set; runs once per worker process.
+        configure_litellm_from_env()
 
     def _truncate_tool_response(self, text: Optional[str]) -> str:
         """Right-truncate a tool observation to max_tool_response_length tokens."""
