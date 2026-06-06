@@ -21,6 +21,7 @@ compares `get_db_hash()` (see `tau2/evaluator/evaluator_env.py`).
 
 from __future__ import annotations
 
+import os
 import uuid
 from typing import Any, Optional
 
@@ -71,6 +72,10 @@ class Tau2Session:
 
         self.user = make_user_simulator(task, model=user_model, llm_args=user_llm_args)
         self.user_state = self.user.get_init_state()
+        # Re-rolls for a degenerate user-sim reply (see _generate_user). Thinking-on
+        # eliminated the spurious turn-0 control tokens but introduced a rare (~3%)
+        # empty reply when the model's reasoning loops and truncates before </think>.
+        self._user_sim_max_retries = int(os.environ.get("TAU2_USER_DEGENERATE_RETRIES", "3"))
 
         # Trajectory: system policy + tau2's fixed agent greeting (both prompt-side,
         # no loss). `system_content` lets the caller pass the exact policy text the
@@ -90,11 +95,43 @@ class Tau2Session:
         return self._tool_schemas
 
     # --- user simulator turns (blocking: litellm) --------------------------
+    def _generate_user(
+        self, message: Message, *, first: bool
+    ) -> tuple[UserMessage, bool]:
+        """Call the user simulator, re-rolling a *degenerate* reply.
+
+        The local Qwen3.x user-sim (thinking on) occasionally glitches in two ways:
+        (a) it returns **empty content** — a pathological reasoning loop truncated
+        before `</think>`, which would become a contentless UserMessage that crashes
+        tau2's `validate_message` on the next turn; (b) **only as the very first
+        turn**, it emits a bare control token (###STOP### / ###OUT-OF-SCOPE### /
+        ###TRANSFER###), which is never legitimate before any exchange. Both are
+        stochastic, so a fresh re-roll almost always recovers. We roll the user-sim
+        state back between attempts so a discarded attempt doesn't corrupt its history.
+
+        Returns (user_message, is_stop). On the first turn an exhausted retry budget
+        is treated as a real stop; mid-conversation an exhausted empty reply also
+        signals stop so the loop ends gracefully instead of crashing downstream.
+        """
+        snapshot = len(self.user_state.messages)
+        user_msg = None
+        for _ in range(self._user_sim_max_retries + 1):
+            del self.user_state.messages[snapshot:]  # discard a prior bad attempt
+            user_msg, self.user_state = self.user.generate_next_message(
+                message, self.user_state
+            )
+            is_stop = self.user.is_stop(user_msg)
+            has_text = bool((user_msg.content or "").strip())
+            degenerate = (not has_text) or (first and is_stop)
+            if not degenerate:
+                return user_msg, is_stop
+        # Retries exhausted: surface as a stop (empty -> terminate gracefully; a
+        # first-turn control token is an honest out-of-scope) so the caller ends here.
+        return user_msg, True
+
     def start(self) -> UserMessage:
         """Generate the first real user request (user reacts to the greeting)."""
-        user_msg, self.user_state = self.user.generate_next_message(
-            self._greeting, self.user_state
-        )
+        user_msg, _ = self._generate_user(self._greeting, first=True)
         self.messages.append(user_msg)
         return user_msg
 
@@ -102,13 +139,11 @@ class Tau2Session:
         """User simulator responds to an agent natural-language message.
 
         Returns (user_message, is_stop). `is_stop` is tau2's ###STOP### /
-        ###TRANSFER### / ###OUT-OF-SCOPE### signal.
+        ###TRANSFER### / ###OUT-OF-SCOPE### signal (or an exhausted empty re-roll).
         """
-        user_msg, self.user_state = self.user.generate_next_message(
-            assistant_msg, self.user_state
-        )
+        user_msg, is_stop = self._generate_user(assistant_msg, first=False)
         self.messages.append(user_msg)
-        return user_msg, self.user.is_stop(user_msg)
+        return user_msg, is_stop
 
     # --- agent message recording -------------------------------------------
     def record_assistant(

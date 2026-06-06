@@ -4,6 +4,7 @@ from tau2.data_model.message import AssistantMessage, ToolCall, ToolMessage, Use
 
 from tau2_airline_verl.rollout.conversion import (
     openai_tool_call_to_tau2,
+    strip_think,
     tau2_message_to_openai,
 )
 
@@ -32,3 +33,20 @@ def test_assistant_tool_call_and_tool_message():
 def test_openai_tool_call_to_tau2():
     tc = openai_tool_call_to_tau2("book", '{"x": 1}', call_id="c9")
     assert tc.name == "book" and tc.arguments == {"x": 1} and tc.requestor == "assistant"
+
+
+def test_strip_think():
+    # normal turn: reasoning peeled off, visible reply trimmed
+    assert strip_think("<think>plan the lookup</think>\n\nHello, how can I help?") == (
+        "Hello, how can I help?"
+    )
+    # tool-turn preamble before the call survives
+    assert strip_think("<think>reason</think>\n\nLet me check that.") == "Let me check that."
+    # no think block: returned as-is (trimmed)
+    assert strip_think("just a reply") == "just a reply"
+    # degenerate turns collapse to "" so the agent loop can detect them
+    assert strip_think("<think>thought but no reply</think>") == ""
+    assert strip_think("<think>\n</think>") == ""
+    assert strip_think("<think>truncated mid-reasoning, never closed") == ""
+    assert strip_think("") == ""
+    assert strip_think(None) == ""

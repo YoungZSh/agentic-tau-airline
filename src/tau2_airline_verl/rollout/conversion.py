@@ -67,6 +67,29 @@ def tool_message_to_text(tool_msg: ToolMessage) -> str:
     return tool_msg.content or ""
 
 
+def strip_think(text: str | None) -> str:
+    """Strip the policy's `<think>...</think>` chain-of-thought, returning the
+    user-visible reply (whitespace-trimmed).
+
+    Qwen3's reasoning format puts private chain-of-thought first, then the actual
+    reply. The decoded completion keeps it (the hermes tool parser only removes
+    `<tool_call>` tags), so the reasoning must be peeled off before anything on the
+    tau2 side (user simulator, COMMUNICATE / NL_ASSERTION judges) sees the message.
+    The user-visible reply is whatever follows the final `</think>`. If the model
+    opened `<think>` but never closed it (truncated mid-reasoning), there is no
+    visible reply yet, so we return "".
+    """
+    if not text:
+        return ""
+    close = "</think>"
+    idx = text.rfind(close)
+    if idx != -1:
+        return text[idx + len(close):].strip()
+    if "<think>" in text:
+        return ""
+    return text.strip()
+
+
 def build_tau2_assistant(
     content: str | None, parsed_tool_calls: list[Any] | None = None
 ) -> AssistantMessage:
@@ -97,4 +120,5 @@ __all__ = [
     "openai_tool_call_to_tau2",
     "tool_message_to_text",
     "build_tau2_assistant",
+    "strip_think",
 ]
