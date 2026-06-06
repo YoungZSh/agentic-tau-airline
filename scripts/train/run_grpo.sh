@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# GRPO + LoRA + multi-turn async rollout — Qwen3-8B on 2×A100 80GB (plan stage 2).
-# Entry: verl.trainer.main_ppo over the default ppo_trainer.yaml; reward flows from
-# our tau2_airline AgentLoop via the `naive` manager. Every knob is env-overridable
-# so run_grpo_smoke.sh can reuse this.
+# GRPO/GDPO + LoRA + multi-turn async rollout — Qwen3-8B on 2×A100 80GB (plan stage 2).
+# Entry: verl.trainer.main_ppo over the default ppo_trainer.yaml; the scalar reward flows
+# from our tau2_airline AgentLoop via the `naive` manager, and the DB/COMMUNICATE subscores
+# flow alongside it (reward_extra_info) so the default GDPO advantage can normalize each
+# dimension separately (see adv_estimator below). Every knob is env-overridable so
+# run_grpo_smoke.sh can reuse this.
 set -xeuo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -12,7 +14,7 @@ cd "$HERE"
 # Per-run folder outputs/<run_name>_<timestamp>/{checkpoints,logs} — one timestamp
 # so a run's weights and logs stay together and never collide across runs.
 project_name=${PROJECT_NAME:-verl_grpo_airline}
-experiment_name=${EXPERIMENT_NAME:-qwen3_8b_lora_tau2_airline}
+experiment_name=${EXPERIMENT_NAME:-qwen3_8b_lora_grpo_tau2_airline}
 logger=${LOGGER:-'["console","wandb"]'}
 run_name=${RUN_NAME:-$experiment_name}
 run_timestamp=${RUN_TIMESTAMP:-$(date +%Y%m%d_%H%M%S)}
@@ -35,7 +37,12 @@ fi
 export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-lo}
 
 : "${OPENAI_API_KEY:?set OPENAI_API_KEY in .env (gpt-5 user simulator)}"
-MODEL_PATH="${QWEN3_8B_PATH:?set QWEN3_8B_PATH in .env}"
+# Init checkpoint. Default = the merged SFT cold-start checkpoint, so `bash run_grpo.sh`
+# realizes the SFT→GDPO combo: RL starts from the cold-started weights and the LoRA adapters
+# train on top of the SFT-merged base (not base Qwen3). Override INIT_MODEL_PATH for a
+# different init, e.g. INIT_MODEL_PATH="${QWEN3_8B_PATH}" for a base+GDPO control run.
+MODEL_PATH="${INIT_MODEL_PATH:-$HERE/outputs/qwen3_8b_full_sft_tau2_airline_20260605_152720/hf_merged}"
+[ -d "$MODEL_PATH" ] || { echo "[run_grpo] init checkpoint not found: $MODEL_PATH — set INIT_MODEL_PATH"; exit 1; }
 
 NGPUS_PER_NODE=${NGPUS_PER_NODE:-2}
 NNODES=${NNODES:-1}
@@ -55,6 +62,24 @@ ppo_max_token_len_per_gpu=${PPO_MAX_TOKEN_LEN_PER_GPU:-20480}
 actor_lr=${ACTOR_LR:-1e-5}
 kl_loss_coef=${KL_LOSS_COEF:-0.01}
 entropy_coeff=${ENTROPY_COEFF:-0}
+
+# Advantage estimator. Default GDPO (Group reward-Decoupled Normalization): rather than
+# normalizing the single DB×COMMUNICATE product (vanilla GRPO), it normalizes DB,
+# COMMUNICATE, and their product as 3 separate dimensions within each group, then sums.
+# This yields a gradient on a dimension that still varies even when the product is all-zero
+# across a group (e.g. COMMUNICATE flips 0/1 while DB is stuck at 0 → product all 0 → GRPO
+# sees no signal, GDPO still learns the COMMUNICATE dimension — exactly the SFT-rescued
+# "must report numbers" tasks). The subscores are emitted by our AgentLoop into
+# reward_extra_info → non_tensor_batch; the keys/weights below must match those names.
+# Eval is unaffected (tau2 native product), so base/trained numbers stay comparable.
+# Set ADV_ESTIMATOR=grpo to revert to single-scalar GRPO (the keys are then ignored).
+# NOTE: ppo_trainer.yaml's `algorithm:` node is a struct-mode dict that does NOT declare
+# gdpo_reward_keys/weights (they live only in the AlgoConfig dataclass), so the overrides
+# below MUST use the `++` force-append prefix — a plain `algorithm.gdpo_reward_keys=` is
+# rejected with "Key 'gdpo_reward_keys' is not in struct". GDPO reads them via .get().
+adv_estimator=${ADV_ESTIMATOR:-gdpo}
+gdpo_reward_keys=${GDPO_REWARD_KEYS:-'[db,comm,db_comm]'}
+gdpo_reward_weights=${GDPO_REWARD_WEIGHTS:-'[1.0,1.0,1.0]'}
 
 lora_rank=${LORA_RANK:-32}                       # plan §6.3 (r32/alpha64, ratio 2)
 lora_alpha=${LORA_ALPHA:-64}
@@ -82,7 +107,9 @@ rollout_data_dir=${ROLLOUT_DATA_DIR:-"$logs_dir/rollouts"}
 val_data_dir=${VAL_DATA_DIR:-"$logs_dir/val_rollouts"}
 
 python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=grpo \
+    algorithm.adv_estimator="${adv_estimator}" \
+    ++algorithm.gdpo_reward_keys="${gdpo_reward_keys}" \
+    ++algorithm.gdpo_reward_weights="${gdpo_reward_weights}" \
     algorithm.norm_adv_by_std_in_grpo=True \
     algorithm.use_kl_in_reward=False \
     data.train_files="${TRAIN_FILES}" \

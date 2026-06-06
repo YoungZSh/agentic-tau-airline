@@ -172,21 +172,67 @@
 
 ---
 
-## 5. 一个待评估的方向:SFT 冷启动
+## 5. SFT 冷启动 + GDPO 解耦优势:已落地并验证 ✅
 
-病因③(7 个任务)是「模型真不会」,RL-zero 在这种长链硬任务上冷启动困难(撞不出第一条非 0 轨迹就没梯度)。一个候选:用现成的 tau2 airline SFT 数据先冷启动。
+针对病因②(COMMUNICATE 锁死)与③(模型真不会),本项目落地了两个**互补**的改动,均已验证。
 
-- 候选数据集:`inclusionAI/AReaL-tau2-data`(HF)。`tau2_sft_train.jsonl` 874MB / 33531 条,其中 **airline 12842 条**;三 domain 混在一起,需按 domain 过滤。已下载到本地 `local_datasets/`(经 `--noproxy` 绕过本机代理,见下)。
-- **尚未确认能否直接用**:还需核对它的 tool-call 格式、以及它的 policy 与本项目 `policy.md` 是否一致(初步抽取出现可疑差异:AReaL policy 只抽到 438 字符 vs 我们的 7676,未确认是真用精简 policy 还是抽取截断)。
-- **这是一个方向性决定**:项目当前定位写死为 **RL-zero、明确「无 SFT」**(CLAUDE.md / plan)。引入 SFT 冷启动不是坏事(诊断确实显示 RL-zero 冷启动困难),但要有意识地做这个 trade-off。
+### 5.1 SFT 冷启动 —— 已跑通,把 7/14 个全 0 任务变成 informative
+
+放弃「纯 RL-zero」定位,用 tau2 airline 的多轮轨迹做 **full-param 冷启动**(算子/显存细节见
+`docs/sft_fused_kernels.md`,数据/脚本见 `src/tau2_airline_verl/sft/` + `scripts/train/run_sft.sh`):
+
+- **数据**:本地 AReaL airline 子集,经 `KeepThinkMultiTurnSFTDataset` 处理(每个 assistant
+  turn 保留 `<think>`、注入 airline tool schema,使 SFT token 布局与 RL rollout 一致),token
+  中位数 ~15k、`max_length=32768`。
+- **训练**:Qwen3-8B 全参、纯 ZeRO-3(3 卡)、fused linear CE 消掉 ~10GB logits。2 epoch /
+  116 step,loss 0.82→0.30,val 0.296,峰值 ~66.7GB、无 OOM,已 merge 成 HF
+  (`outputs/qwen3_8b_full_sft_tau2_airline_20260605_152720/hf_merged/`)。
+- **效果**:用 SFT ckpt 对原本 14 个全 0 任务重新 rollout(8 条/任务),**7 个由「全 0 死锁」
+  变为 informative**(reward 既非全 0 也非全 1 → 组内有方差 → 有梯度):
+
+  | task | SFT 后平均 reward | 原病因 |
+  |---|---|---|
+  | 12 | 0.125 | ③ |
+  | 15 | 0.375 | ③ |
+  | 18 | 0.375 | ②(报数字 + DB 同时对上) |
+  | 24 | 0.250 | ③ |
+  | 29 | 0.125 | ③ |
+  | 39 | 0.625 | ①(turn 已放开到 24)+ SFT |
+  | 42 | 0.500 | ①(同上)+ SFT |
+
+  - **病因③的干净证据**:12/15/24/29 的 turn 一直够用,纯靠 SFT 学会了动作链 → 印证它们是
+    「模型不会」而非环境/口径问题。
+  - **注意混杂项**:39/42 的解锁同时含「turn 放开到 24」与 SFT 两个因素,不能单独归因。
+  - **仍 0**:7、14、23、32、35、37、44。其中 **7/14/23 的子分显示 `COMMUNICATE=1.0、DB=0.0`**
+    —— SFT 已教会「报数字」(COMM 维解锁),但 DB 还没跟上,**乘积仍被压成 0**。这正好引出 5.2。
+
+### 5.2 GDPO 解耦优势 —— 给 COMMUNICATE 维补梯度(直接解病因②)
+
+5.1 暴露的残留(COMM 已对、DB 未对 → 乘积 0)就是病因②的本质:**乘积把单维进步抹平**。解法在
+**advantage 层**:把 DB / COMMUNICATE / DB×COMM 三维各自在 GRPO 组内单独归一化再相加(verl 0.9
+原生 `adv_estimator=gdpo`,设计/接线/证明见 `docs/gdpo_decoupled_advantage.md`)。
+
+- **离线验证**:对「DB 恒 0、COMM 组内 0/1 变动、乘积全 0」的组,GRPO 优势 `[0,0,0,0]`(零梯度),
+  GDPO 优势 `[−0.96,+0.96,−0.96,+0.96]`(非零、符号正确,报了数字的拿正)。
+- **已接线**:`Tau2AirlineAgentLoop` 把 `db/comm/db_comm` 发进 `reward_extra_info` →
+  `non_tensor_batch`;`run_grpo.sh` 默认 `ADV_ESTIMATOR=gdpo`。**reward 标量与 eval 口径不变**
+  (仍是官方乘积),base/trained 数字仍可直接比较。
+- **与 SFT 互补,但都不万能**:SFT 把 COMM 维从「全 0」顶到「有 0/1 区分」,GDPO 再把这个区分
+  变成梯度;但若一个组在**所有维度**都零方差(如 7/14/23 的 DB 维仍可能全 0),两者都给不出信号
+  —— 那要靠继续 RL 撞对 DB,或后续 reward/turn 的进一步处置。
 
 > 环境提示:本机所有请求默认走代理 `127.0.0.1:17897`,`hf-mirror.com` 不在 `NO_PROXY` 白名单 → 会被代理拦截超时。下 HF 镜像须 `--noproxy`/`NO_PROXY` 直连。
 
 ---
 
-## 6. 最高优先级待办
+## 6. 待办状态
 
 1. ~~验证病因②波及面(拆 DB/COMMUNICATE 子分)~~ ✅ 已完成:确认仅 4 个(7/14/18/23)。
-2. **决定 reward 口径**:病因② 是 reward 把可学信号抹平了。是否在训练期按 `reward_basis` 分量分别给信号(而非只用乘积标量),让「DB 做对」也能拿到部分 reward / 产生组内方差?——这会直接改变 7/14/18/23 能否学动。
-3. **决定 39/42/44 去留**:删/换,还是抬 `max_response_length`+`ppo_max_token`(赌显存)真正放开 turn=24。
-4. **决定是否引入 SFT 冷启动**:先核对 AReaL 数据格式/policy 兼容性,再定是否打破 RL-zero 定位。
+2. ~~决定 reward 口径~~ ✅ **已决定并实现:GDPO 解耦优势**(§5.2)。不改奖励标量、只在 advantage
+   层逐维归一化,7/14/23 这类「COMM 已对、DB 未对」的轨迹现在能在 COMM 维拿到梯度。
+3. **决定 39/42/44 去留**(未结):turn 已放开到 24,39/42 经 SFT 已 informative;**44 仍 0**,
+   gold 19 动作仍可能超预算 → 待删/换,或试 `max_parallel_calls`(§4)。
+4. ~~决定是否引入 SFT 冷启动~~ ✅ **已引入并验证**(§5.1):救回 7/14。项目定位从「纯 RL-zero」
+   调整为 **SFT 冷启动 → GDPO RL**。
+5. **下一步(本次):从 SFT 合并 ckpt 起步,跑 SFT→GDPO 完整训练**,在训练曲线上确认 7/14/18/23
+   等任务的 reward 是否随 GDPO 抬升。

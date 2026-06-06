@@ -28,12 +28,25 @@
 - **核心立场**:**只用最终任务完成度做 reward,不奖励中间步骤/格式**,理由是中间整形易被 hack。
   ⇒ 与我们的 reward 哲学一致,可作为"outcome-only 是对的"的主要外部背书。
 
-### A3. 其他 reward / credit 设计变体
+### A3. EigenData:From Self-Evolving Synthetic Data to Verifiable-Reward RL
+- 链接:https://arxiv.org/abs/2601.22607
+- 一句话:层级式多智能体框架 **EigenData**,把**自进化合成数据**(工具落地的对话 + 每实例
+  可执行 checker)与**可验证奖励 RL** 串起来,闭环 self-evolving 提升生成可靠性;RL 用
+  GRPO-style **trajectory-level group-relative advantage + dynamic filtering**。
+  **τ²-bench Airline 73.0% / Telecom 98.3% pass@1**(目前 airline 上很高的公开数字)。
+- **核心看点(与我们最相关)**:
+  - **每实例可执行 checker 当可验证奖励**——比我们用官方 `evaluate_simulation` 更细粒度,
+    但同属 outcome/verifiable 口径、不手搓 per-turn 整形奖励(与 A1/A2 立场一致)。
+  - **专门处理 user-simulator 噪声**:对 user model 做微调以压低模拟用户带来的 noisy signal——
+    直接对应我们 gpt-5 在线 user-sim 的可靠性/噪声问题。
+  - **SFT cold-start + GRPO** 的 pipeline,与我们现在的 **SFT→GDPO** 路线同构,可对照数据合成接法。
+
+### A4. 其他 reward / credit 设计变体
 - RC-GRPO(Reward-Conditioned GRPO for multi-turn tool calling):https://arxiv.org/pdf/2602.03025
 - Reinforcing Multi-Turn Reasoning via Turn-Level Reward Design:https://arxiv.org/pdf/2505.11821
 - CM2:RL with Checklist Rewards for Multi-Turn & Multi-Step Agentic Tool Use:https://arxiv.org/pdf/2602.12268
 
-### A4. 综述 / 实操指南
+### A5. 综述 / 实操指南
 - A Practitioner's Guide to Multi-turn Agentic Reinforcement Learning:https://arxiv.org/html/2510.01132v1
 - SkyRL-Agent:Efficient RL Training for Multi-turn LLM Agent:https://arxiv.org/abs/2511.16108
 
@@ -90,3 +103,5 @@
    已定方向:**调小 `TRAIN_BATCH_SIZE`(40→8,免费加更新数)+ 抬 `TOTAL_EPOCHS` 把总步数顶到 ~150–300**。
 4. **评测可信度**:考虑切到 B5(tau2-bench-verified)以规避标注/泄漏问题。
 5. **异步深化**:若日后要 off-policy 真异步,优先参考 B3(SkyRL-Agent)与 verl 的 one_step_off/fully_async recipe。
+6. **user-sim 噪声是真问题**:A3(EigenData)专门微调 user model 来压噪声,且其 SFT→GRPO + 可验证
+   checker 路线与我们的 SFT→GDPO 同构、airline 数字(73.0%)很高——是当前最值得贴身对照的工作。

@@ -36,10 +36,24 @@ _ALL_COMPONENTS = [
 def set_nl_judge_model(model: Optional[str] = None) -> str:
     """Override the LLM used for NL_ASSERTION judging (tau2 default is gpt-4.1).
 
+    Patches the evaluator module's symbols in-place: the model name, and — when the
+    judge is the local Qwen3.x server (TAU2_DISABLE_THINKING=1) — injects
+    `extra_body.chat_template_kwargs.enable_thinking=false` into the judge's llm_args
+    so its verdict isn't buried in a <think> block (which would break parsing).
+    Re-enabling thinking would require a vllm reasoning parser, so it's off by default.
+
     Returns the model now in effect. Call once at startup.
     """
     model = model or os.environ.get("TAU2_NL_JUDGE_MODEL", "gpt-5")
     _nl_mod.DEFAULT_LLM_NL_ASSERTIONS = model
+    if os.environ.get("TAU2_DISABLE_THINKING", "1") == "1":
+        args = dict(getattr(_nl_mod, "DEFAULT_LLM_NL_ASSERTIONS_ARGS", {}) or {})
+        extra = dict(args.get("extra_body") or {})
+        ctk = dict(extra.get("chat_template_kwargs") or {})
+        ctk["enable_thinking"] = False
+        extra["chat_template_kwargs"] = ctk
+        args["extra_body"] = extra
+        _nl_mod.DEFAULT_LLM_NL_ASSERTIONS_ARGS = args
     return model
 
 

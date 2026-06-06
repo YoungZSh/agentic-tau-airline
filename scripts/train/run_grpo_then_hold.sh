@@ -32,7 +32,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # --- single source of truth: which physical GPUs this run owns ---
-GPU_LIST="${GPU_LIST:-1 3}"                       # physical ids, space-separated
+GPU_LIST="${GPU_LIST:-1 2}"                       # physical ids, space-separated
 export CUDA_VISIBLE_DEVICES="${GPU_LIST// /,}"    # -> "1,3" : verl/vLLM see exactly these two (logical 0,1)
 
 GPU_HOLD="${GPU_HOLD:-/ssd/home/zc/yzs/omini/tools/gpu_hold.py}"
