@@ -19,6 +19,20 @@ logger=${LOGGER:-'["console","wandb"]'}
 run_name=${RUN_NAME:-$experiment_name}
 run_timestamp=${RUN_TIMESTAMP:-$(date +%Y%m%d_%H%M%S)}
 run_dir=${RUN_DIR:-"$HERE/outputs/${run_name}_${run_timestamp}"}
+
+# Resume: set RESUME_FROM=<a previous run dir> to continue it IN PLACE. The run
+# reuses that folder, so verl's resume_mode=auto finds the newest global_step_N in
+# its checkpoints/ (via latest_checkpointed_iteration.txt), restores actor+optim+
+# dataloader state, and continues; new checkpoints and a fresh-timestamped log land
+# in the same folder, keeping the run contiguous. Leave empty for a fresh run.
+# INIT_MODEL_PATH must stay the same base the run started from (LoRA loads on top).
+RESUME_FROM=${RESUME_FROM:-}
+if [ -n "$RESUME_FROM" ]; then
+    run_dir="$RESUME_FROM"
+    [ -d "$run_dir/checkpoints" ] || { echo "[run_grpo] RESUME_FROM has no checkpoints/: $run_dir" >&2; exit 1; }
+    echo "[run_grpo] RESUMING from $run_dir (resume_mode=auto -> latest global_step in checkpoints/)"
+fi
+resume_mode=${RESUME_MODE:-auto}
 default_local_dir=${DEFAULT_LOCAL_DIR:-"$run_dir/checkpoints"}
 logs_dir="$run_dir/logs"
 mkdir -p "$logs_dir"
@@ -36,7 +50,7 @@ fi
 # allgather and deadlocks init (single node; data plane still uses NVLink/SHM).
 export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-lo}
 
-: "${OPENAI_API_KEY:?set OPENAI_API_KEY in .env (gpt-5 user simulator)}"
+: "${OPENAI_API_KEY:?set OPENAI_API_KEY in .env (user-sim + NL judge API key; default DeepSeek V4)}"
 # Init checkpoint. Default = the merged SFT cold-start checkpoint, so `bash run_grpo.sh`
 # realizes the SFT→GDPO combo: RL starts from the cold-started weights and the LoRA adapters
 # train on top of the SFT-merged base (not base Qwen3). Override INIT_MODEL_PATH for a
@@ -62,6 +76,21 @@ ppo_max_token_len_per_gpu=${PPO_MAX_TOKEN_LEN_PER_GPU:-20480}
 actor_lr=${ACTOR_LR:-1e-5}
 kl_loss_coef=${KL_LOSS_COEF:-0.01}
 entropy_coeff=${ENTROPY_COEFF:-0}
+# KL-loss switch. USE_KL_LOSS=False -> no actor-side KL AND (with use_kl_in_reward=False)
+# the ref model is never loaded (ppo_trainer.yaml: ref enabled only if either KL is on).
+# This is how we match AReaL's kl_ctl=0 (trust region comes from clip_ratio alone).
+use_kl_loss=${USE_KL_LOSS:-True}
+# PPO clip width. verl's loss reads clip_ratio_low/high (they default to clip_ratio but
+# the generated config pins them to 0.2), so all three are set below. AReaL uses 0.4.
+clip_ratio=${CLIP_RATIO:-0.2}
+# FSDP offload. With vLLM colocated on the SAME 2 GPUs (HybridEngine sleep_level=1 keeps
+# vLLM weights resident), a full-batch actor + its rollout data can starve vLLM's wake_up
+# KV re-allocation -> "CUDA out of memory at wake_up". Offloading the actor params+optim to
+# CPU during rollout frees the card for vLLM. Default False (matches the old small-batch
+# runs); set True for full-batch on 2 GPUs. AReaL keeps offload off only because it trains on
+# DEDICATED gpus (24-gpu split); colocated 2-gpu needs it.
+param_offload=${PARAM_OFFLOAD:-False}
+optimizer_offload=${OPTIMIZER_OFFLOAD:-False}
 
 # Advantage estimator. Default GDPO (Group reward-Decoupled Normalization): rather than
 # normalizing the single DB×COMMUNICATE product (vanilla GRPO), it normalizes DB,
@@ -96,7 +125,7 @@ agent_num_workers=${AGENT_NUM_WORKERS:-8}
 
 total_epochs=${TOTAL_EPOCHS:-20}              # batch=8 -> 5 steps/epoch, so 20 epochs = 100 steps
 # Save/eval every 10 steps -> ~10 curve points. Each eval runs 10 held-out tasks
-# through tau2 + gpt-5, so it isn't free; drop TEST_FREQ to 5 for a finer curve.
+# through tau2 + the user-sim (DeepSeek V4), so it isn't free; drop TEST_FREQ to 5 for a finer curve.
 save_freq=${SAVE_FREQ:-10}
 test_freq=${TEST_FREQ:-10}
 max_ckpt_to_keep=${MAX_CKPT_TO_KEEP:-8}       # keep 8 newest (steps 30..100) to pick the best eval step
@@ -130,12 +159,15 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.ppo_mini_batch_size=${ppo_mini_batch_size} \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=${ppo_max_token_len_per_gpu} \
-    actor_rollout_ref.actor.use_kl_loss=True \
+    actor_rollout_ref.actor.use_kl_loss=${use_kl_loss} \
     actor_rollout_ref.actor.kl_loss_coef=${kl_loss_coef} \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.actor.entropy_coeff=${entropy_coeff} \
-    actor_rollout_ref.actor.fsdp_config.param_offload=False \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+    actor_rollout_ref.actor.clip_ratio=${clip_ratio} \
+    actor_rollout_ref.actor.clip_ratio_low=${clip_ratio} \
+    actor_rollout_ref.actor.clip_ratio_high=${clip_ratio} \
+    actor_rollout_ref.actor.fsdp_config.param_offload=${param_offload} \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=${optimizer_offload} \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.mode=async \
     actor_rollout_ref.rollout.tensor_model_parallel_size=${rollout_tp} \
@@ -161,6 +193,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.project_name=${project_name} \
     trainer.experiment_name=${experiment_name} \
     trainer.default_local_dir="${default_local_dir}" \
+    trainer.resume_mode=${resume_mode} \
     trainer.n_gpus_per_node=${NGPUS_PER_NODE} \
     trainer.nnodes=${NNODES} \
     trainer.val_before_train=${val_before_train} \
