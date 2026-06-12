@@ -123,6 +123,12 @@ class Tau2AirlineAgentLoop(AgentLoopBase):
         assistant_turns = 0
         user_turns = 0
         termination_reason = TerminationReason.MAX_STEPS
+        # fully_async weight-version span (see _rollout_trajectory). Defaults to 0 so an
+        # EXCLUDED rollout — where _rollout_trajectory raises before any generate — still
+        # emits valid ints; the fully_async trainer crashes on the None the batch
+        # assembler would otherwise fill for these keys.
+        min_global_steps = 0
+        max_global_steps = 0
         try:
             (
                 session,
@@ -132,6 +138,8 @@ class Tau2AirlineAgentLoop(AgentLoopBase):
                 assistant_turns,
                 user_turns,
                 termination_reason,
+                min_global_steps,
+                max_global_steps,
             ) = await self._rollout_trajectory(
                 task, system_content, sampling_params, request_id, metrics
             )
@@ -214,6 +222,13 @@ class Tau2AirlineAgentLoop(AgentLoopBase):
                 # from the gradient (response_mask zeroed) — watch its mean to catch
                 # a systemic user-sim / infra failure instead of silently absorbing it.
                 "excluded": 1.0 if excluded else 0.0,
+                # fully_async param-version span (see _rollout_trajectory). The trainer's
+                # batch assembler (detach_utils) reads these from non_tensor_batch and does
+                # max-min per trajectory for staleness/partial tracking; the worker fills
+                # absent keys with None, which crashes the subtraction — so always emit ints.
+                # Unused under the colocated trainer.
+                "min_global_steps": min_global_steps if min_global_steps is not None else 0,
+                "max_global_steps": max_global_steps if max_global_steps is not None else 0,
             },
         )
 
@@ -223,7 +238,8 @@ class Tau2AirlineAgentLoop(AgentLoopBase):
         """Build one trajectory: tau2 session + interleaved policy/user/tool turns.
 
         Returns (session, prompt_ids, response_mask, response_logprobs,
-        assistant_turns, user_turns, termination_reason). Raises on any failure;
+        assistant_turns, user_turns, termination_reason, min_global_steps,
+        max_global_steps). Raises on any failure;
         run() catches it to EXCLUDE the rollout from the gradient update rather than
         crash the batch. Token bookkeeping mirrors verl's ToolAgentLoop: assistant
         (policy) tokens are mask 1, tool/user observations mask 0.
@@ -244,6 +260,12 @@ class Tau2AirlineAgentLoop(AgentLoopBase):
         assistant_turns = 0
         user_turns = 0
         termination_reason = TerminationReason.MAX_STEPS
+        # Model-weight version span across turns. FullyAsyncLLMServerClient stamps each
+        # generate output with min/max_global_steps; the fully_async trainer subtracts
+        # them per trajectory (detach_utils) and crashes on None. Stay None until the
+        # first stamped generate (the colocated server never stamps -> None -> run() -> 0).
+        min_global_steps = None
+        max_global_steps = None
 
         while True:
             # ---- policy (assistant) turn: mask 1 -------------------------------
@@ -258,6 +280,16 @@ class Tau2AirlineAgentLoop(AgentLoopBase):
             if output.log_probs:
                 response_logprobs += output.log_probs
             assistant_turns += 1
+
+            # Aggregate the fully_async weight-version stamp across turns (min of mins,
+            # max of maxes). None-safe: colocated outputs carry no stamp, so these stay
+            # None and run() coerces them to 0.
+            _ef = getattr(output, "extra_fields", None) or {}
+            _gs_min, _gs_max = _ef.get("min_global_steps"), _ef.get("max_global_steps")
+            if _gs_min is not None:
+                min_global_steps = _gs_min if min_global_steps is None else min(min_global_steps, _gs_min)
+            if _gs_max is not None:
+                max_global_steps = _gs_max if max_global_steps is None else max(max_global_steps, _gs_max)
 
             if len(response_mask) >= self.response_length:
                 termination_reason = TerminationReason.MAX_STEPS
@@ -348,4 +380,6 @@ class Tau2AirlineAgentLoop(AgentLoopBase):
             assistant_turns,
             user_turns,
             termination_reason,
+            min_global_steps,
+            max_global_steps,
         )
